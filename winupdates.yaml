@@ -1,0 +1,37 @@
+---
+
+- hosts: windows
+  gather_facts: false
+  become_method: runas
+  become_user: root
+  tasks:
+  - name: updating
+    win_updates:
+      category_names:
+        - SecurityUpdates
+        - CriticalUpdates
+        - UpdateRollups
+        - Updates
+        - DefinitionUpdates
+        - Applications
+      log_path: c:\ansible_wu.txt
+    register: updatedata
+    changed_when: true
+
+  - name: rebooting
+    win_reboot:
+    changed_when: false
+    when: updatedata.reboot_required == "true"
+
+  - name: Check if Print Spooler exists and the state
+    win_service:
+      name: Print Spooler
+    register: service_info
+
+  - debug: msg="{{service_info.exists}}"
+  - debug: msg="{{service_info.state}}"
+
+  - name: Logging issue
+    win_shell: add-content C:\UpdateFailed.txt "Unable to start Print Spooler Service"
+    when: service_info.state != "Running"
+...
