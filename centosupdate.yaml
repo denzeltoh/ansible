@@ -1,0 +1,80 @@
+---
+
+- hosts: centos
+  tasks:
+  - name: Check packages for updates
+    shell: yum list updates
+    changed_when: updates.stdout_lines | length > 0
+    args:
+      warn: false
+    register: updates
+
+  - name: Display count
+    debug:
+      msg: "Found {{ updates.stdout_lines | length }} packages to be updated"
+
+  - when: updates.stdout_lines | length > 0
+    block:
+    - name: Downloading and installing updates using yum
+      become: yes
+      become_user: root
+      yum:
+        name: "httpd"
+        state: latest
+
+    - name: install yum-utils
+      package:
+        name: yum-utils
+
+    - name: Checking if rebooting is required
+      shell: needs-restarting -r
+      failed_when: false
+      register: reboot_required
+      changed_when: false
+
+  - when: updates.stdout_lines | length > 0 and reboot_required.rc !=0
+    block:
+    - name: Reboot system if required
+      shell: "sleep 3 && reboot"
+      async: 1
+      poll: 0
+      changed_when: false
+      ignore_errors: true
+
+    - name: wait for system to reboot
+      wait_for_connection:
+         connect_timeout: 30
+         delay: 20
+         timeout: 120
+
+    - name: Start HTTPD Service
+      service: name=httpd state=started enabled=yes
+
+    - name: Retrieve service facts
+      service_facts:
+
+    - name: Collect HTTPD Service Status
+      debug:
+        var: ansible_facts.services["httpd.service"]
+
+    - when: ansible_facts.services['httpd.service'] is not defined
+      block:
+      - name: Find ID of last yum transaction
+        shell: yum history httpd | sed -n 3p | awk -F "|" '{ print $1 }' | tr -d ' '
+        register: transaction_id
+
+      - debug: var=transaction_id.stdout
+        when: transaction_id.stderr == ""
+
+      - name: get info on that transaction
+        command: yum history info {{ transaction_id.stdout }}
+        register: transaction_info
+        when: transaction_id.stderr == ""
+
+      - debug: var=transaction_info.stdout_lines
+        when: transaction_id.stderr == ""
+
+      - name: Undoing transaction
+        command: yum -y history undo {{ transaction_id.stdout }}
+        when: transaction_id.stderr == ""
+...
