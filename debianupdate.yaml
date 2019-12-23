@@ -1,0 +1,74 @@
+---
+
+- hosts: debian
+  tasks:
+  - name: check packages for updates
+    shell: apt list --upgradable
+    changed_when: false
+    args:
+    register: updates
+
+  - name: display count
+    debug:
+      msg: "Found {{ updates.stdout_lines | length - 1 }} packages to be updated"
+
+  - name: updating/upgrading packages
+    apt:
+      name: apache2
+      state: latest
+      force_apt_get: True
+    when: updates.stdout_lines | length !=0
+
+##  - name: check if reboot in required
+##    shell: needs-restarting -r
+##    failed_when: false
+##    register: reboot_required
+##    changed_when: false
+
+##  - when: updates.stdout_lines | length > 0 and reboot_required.rc == 1
+##    block:
+##    - name: reboot server if required
+##      shell: sleep 3 ; reboot
+##      ignore_errors: true
+##      changed_when: true
+##      async : 1
+##      poll: 0
+
+  - block:
+    - name: reboot host
+      shell: sleep 3 ; reboot
+      async: 1
+      poll: 0
+
+    - name: wait for system to come back after reboot
+      wait_for_connection:
+        timeout: 600
+      delay: 20
+      register: reboot_result
+
+##    - name: reboot results
+##      debug:
+##        msg: "System rebooted."
+##      when: reboot_result > 0
+
+##    - name: system not rebooted
+##      debug:
+##        msg: "System not rebooted."
+##      when: reboot_result ! > 0
+
+  - block:
+    - name: Start Apache2 Service
+      service: name=apache2 state=started enabled=yes
+
+    - name: Retrieve Service Facts
+      service_facts:
+
+    - name: Collect HTTPD Service Status
+      debug:
+        var: ansible_facts.services['apache2.service']
+
+    - when: ansible_facts.services['apache2.service'] is not defined
+      block:
+        - name: Uninstall last package
+          shell: apt purge $(grep "Install:" /var/log/apt/history.log | tail -n 1 | tr " " "\n" | grep ":amd64\|:i386" | tr "\n" " ")
+...
